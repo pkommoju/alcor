@@ -1,0 +1,95 @@
+== Draft design of GoalState reconciliation
+Prasad Kommoju, <pkommoju@futurewei.com>
+
+v.01, 2021-05-10
+
+:toc: right
+
+:sectnums:
+
+== Overview
+GoalState is a set of many different pieces of information about the network configuration of a given host. This is called Intent in some literature. It changes with time, mostly because the users have made some modifications. Sometimes, the changes may arise from the hosts themselves (ground truth, in some literature).
+
+The task of establishing a new goal state from the existing state given a set of changes and publishing it to all concerned entities is the focus of GoalState reconciliation.
+
+It would not deserve a document of its own, if it were simple to compute and inexpensive to distribute. At the moment, GoalState has eight different collections, each of them could contain many instances, or sub-collections.
+
+The main idea here is to find a way to quickly decide if two GoalStates, say G1, and G2 are same or not. If they are different, what is the minimum difference, referred to as GoalState Delta (GSD) in this document. The benefit of the first one is obvious. The benefits of the second part are a) savings in distribution cost, b) savings in host memory requirements.
+
+Any design should also keep in mind that the GoalState structure itself might change with time and the design should not break backward compatibility while admitting new changes.
+
+== Goals and requirements of GoalState reconciliation design
+Based on the overview, the following can be said to be the critical goals for the design.
+
+* Fast to detect the differences.
+* Smallest possible payload to distribute.
+* Removing existing properties in GoalStates should not break the functionality.
+* Adding new properties should be easy, and should not break the functionality.
+
+The first design will keep these goals in mind but can not deliver the second requirement (Smallest possible payload to distribute), instead the payload size will be made smaller in incremental fashion. The reason is that as the size of the payload gets smaller, the time to detect the differences and compute the GSD will go up. There might be an optimal point of intersection of these two metrics but it can not be guessed at this time.
+
+== General mechanisms to meet the requirements
+* Each object or entity that ends up in the GoalState shall have its own unique identifier or an enum (hereafter referred to as EID) within its own "namespace".
+* Existing entities GoalState object shall not be removed.
+* GoalState object can have new entities but without conflicting with any of the previous entities. This means each new entity gets its own unique identifier, or enum.
+* New entities are always added to GoalState after the last entity.
+* Recursively, these rules are applied down the hierarchy of entities in the GoalState object.
+* A signature will be used to detect the differences, and partitioned GoalState object will be used to compute the smallest GSD.
+
+=== EID
+The EID becomes part of the signature of the entity in detecting GSD, therefore EID should not be reused.
+
+=== GoalState object shall not remove existing entities
+The existing entities may be made inactive so that they don't occupy any space but their existence will not be removed.
+
+For instance, If SecurityGroupState is deprecated and a new version of it is introduced. This rule requires that SecurityGroupState be left alone and the new version be added after the last entity, with a different name and EID.
+
+The other mechanisms are self explanatory. These mechanisms are used together to create a canonical representation of the GoalState object, and its components recursively. What this means that, if two GoalState objects (or its sub objects) are copies of each other but merely arranged in a different manner, the canonical representation of the two copies will result in the same signature. This is the key technique in finding if two objects are same or not.
+
+The next section explains the mechanism used to detect the smallest difference (GSD) based on the idea of canonical representation.
+
+== The portioned signature method
+At the moment, the following entities are part of the GoalState:
+
+* VpcState 
+* SubnetState
+* PortState
+* NeighborState
+* SecurityGroupState
+* DHCPState
+* RouterState
+* GatewayState
+
+Each of them can occur more than once. As stated in Section 2 above, the first iteration will focus on finding the smallest GSD for each of these collections.
+
+A pseudo code such below can be used to compute the signatures.[source,]
+
+----
+    Signature[] computeSignature(GoalState obj)
+    {
+        vpcStateSig = computeEntitySignature(obj.vpcState);
+        snsStateSig = computeEntitySignature(obj.subnetState);
+        ...
+        gwStateSig  = computeEntitySignature(obj.gatewayState);
+        
+        signatures[] = {EMPTY, vpcStateSig, ..., gwStateSig);
+        globalSig = CompositeSignature(signatures);
+        signatures[0] = globalSig;
+        
+        return signatures;
+    }
+----
+
+computeEntitySignature will descend down the object hierarchy and return a signature for the canonical representation of the input object.
+
+computeSignature will itself return a global signature for the whole GoalState, and the signatures of individual sub-objects of the GoalState.
+
+Given global signature GSIG1 and GSIG2 of GoalStates GS1 and GS2, it is possible to assert if GS1 and GS2 are same are different. if they are same, then there is no need to compute the smallest delta, the GSD.
+
+If GSIG1 and GSIG2 are different, the GSD is the set of all sub-objects in GS1 and GS2 which have a different signature (vpcStateSig, snsStateSig etc.,).
+
+
+
+
+
+
