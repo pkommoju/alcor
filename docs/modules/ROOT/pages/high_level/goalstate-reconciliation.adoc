@@ -89,7 +89,108 @@ Given global signature GSIG1 and GSIG2 of GoalStates GS1 and GS2, it is possible
 If GSIG1 and GSIG2 are different, the GSD is the set of all sub-objects in GS1 and GS2 which have a different signature (vpcStateSig, snsStateSig etc.,).
 
 
+== Idea for a quick prototype
+
+A quick protype can be brought up using the hashCode() method rather than waiting for adding the signature creation method down the hierarchy. This will still require some new code to be written, but the effort is expected to be smaller than the eventual signature based method. There will have to be a wrapper around hashCode method to handle objects which have sub-objects on so on.
+
+New caches needed:
+
+=== A Cache of GoalState signature which covers the whole of the GoalState.
+This will contain the GS signature, and an object containing the GS, along with signatures for all components contained in that GS.
+
+At a high level, the following new classes and cache are needed.
+
+----
+
+class VpcSign
+{
+    String      vpcSign;
+    VpcState    vpsState;
+}
+
+class SubnetSign
+{
+    String      snSign;
+    SubnetState snState;
+}
+
+class PortStateSign
+{
+    String      ptSign;
+    PortState   ptState;
+}
+
+class NeighborState
+{
+    String          nbSign;
+    NeighborState   nbState;
+}
+    
+class SecurityGroupState
+{
+    String              sgSign;
+    SecurityGroupState  sgState;
+}
+
+class DHCPState
+{
+    String      dhSign;
+    DHCPState   dhState;
+}
+
+class RouterState
+{
+    String      rtSign;
+    RouterState rtState;
+}
+
+class GatewayState
+{
+    String          gwSign;
+    GatewayState    gwState;
+}
+
+    
+class GoalStateSignatureCache
+{
+    Map<String /* gsSign */, GoalState> gsSignCache;
+    ...
+}
 
 
+// Add a getSignature method to each sub object of GoalState
+// and its subobjects.
+class GoalState
+{
+    ...
+    // Create Signture for the entire GoalState object
+    public Signature getSignature()
+    {
+        // get Signature of each sub object and fill them
+        // into sigs, visitor pattern?
+        Signature[] sigs;
+        foreach (s : subobjects)
+            sigs.append(s.getSignature());
+        // visitor pattern?
+        Signtaure sig = combineSig(sigs);
+        
+        return sig;
+    }
+    
+    ...
+}
 
+// Some leaf class in the hierarchy rooted at GoalState object
+class GoalStateLeafClass
+{
+    ...
+    public Signature getSignature()
+    {
+        Signature sig = data.hashCode();
+        return sig;
+    }
+    
+    ...
+}
 
+----
