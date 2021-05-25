@@ -1,11 +1,9 @@
-== Draft design of GoalState reconciliation
-Prasad Kommoju, <pkommoju@futurewei.com>
-
+= Draft design of GoalState reconciliation
+Prasad Kommoju <pkommoju@futurewei.com>
 v.01, 2021-05-10
-
 :toc: right
-
 :sectnums:
+Reference: https://en.wikipedia.org/wiki/Bloom_filter
 
 == Overview
 GoalState is a set of many different pieces of information about the network configuration of a given host. This is called Intent in some literature. It changes with time, mostly because the users have made some modifications. Sometimes, the changes may arise from the hosts themselves (ground truth, in some literature).
@@ -62,9 +60,10 @@ At the moment, the following entities are part of the GoalState:
 
 Each of them can occur more than once. As stated in Section 2 above, the first iteration will focus on finding the smallest GSD for each of these collections.
 
-A pseudo code such below can be used to compute the signatures.[source,]
-
+A pseudo code such below can be used to compute the signatures.
+[source,]
 ----
+
     Signature[] computeSignature(GoalState obj)
     {
         vpcStateSig = computeEntitySignature(obj.vpcState);
@@ -91,7 +90,7 @@ If GSIG1 and GSIG2 are different, the GSD is the set of all sub-objects in GS1 a
 
 == Idea for a quick prototype
 
-A quick protype can be brought up using the hashCode() method rather than waiting for adding the signature creation method down the hierarchy. This will still require some new code to be written, but the effort is expected to be smaller than the eventual signature based method. There will have to be a wrapper around hashCode method to handle objects which have sub-objects on so on.
+A quick prototype can be brought up using the hashCode() method rather than waiting for adding the signature creation method down the hierarchy. This will still require some new code to be written, but the effort is expected to be smaller than the eventual signature based method. There will have to be a wrapper around hashCode method to handle objects which have sub-objects on so on.
 
 New caches needed:
 
@@ -100,8 +99,8 @@ This will contain the GS signature, and an object containing the GS, along with 
 
 At a high level, the following new classes and cache are needed.
 
+[source,]
 ----
-
 class VpcSign
 {
     String      vpcSign;
@@ -125,7 +124,7 @@ class NeighborState
     String          nbSign;
     NeighborState   nbState;
 }
-    
+
 class SecurityGroupState
 {
     String              sgSign;
@@ -150,14 +149,16 @@ class GatewayState
     GatewayState    gwState;
 }
 
-    
 class GoalStateSignatureCache
 {
     Map<String /* gsSign */, GoalState> gsSignCache;
     ...
 }
 
+----
 
+[source,]
+----
 // Add a getSignature method to each sub object of GoalState
 // and its subobjects.
 class GoalState
@@ -173,10 +174,8 @@ class GoalState
             sigs.append(s.getSignature());
         // visitor pattern?
         Signtaure sig = combineSig(sigs);
-        
         return sig;
     }
-    
     ...
 }
 
@@ -189,8 +188,141 @@ class GoalStateLeafClass
         Signature sig = data.hashCode();
         return sig;
     }
-    
     ...
 }
-
 ----
+
+== Alternative designs
+Instead of the top down approach described in the previous section, a bottom up approach can be used to build the GSD without the use of signatures.
+
+At the bottom (leaf node object) GS will be simple object containing only atomic values, or a simple object with one or more arrays of atomic values.
+
+There are two alternatives, not mutually exclusive.
+
+=== Hash based method
+This is the traditional method. Old Goal State components are hashed into a hash table and the corresponding components from the new Goal state are probed. If a match is not found, that component is added to the GSD. If a match is found, then a value comparison is done to rule out hash collision. 
+While this method is fast and accurate, for large objects, it will require proportionally large amount of memory.
+
+=== Bloom filter based method
+Bloom filter is a probabilistic data structure which answers the question of "does this element existing in the set" with "Definitely absent" or "Probably present" (False positive). The ratio of false positives can be made smaller by using more memory. The space and time requirements of bloom filter are constant, space dependent only on the ratio of false positives.
+
+There are many variations of bloom filter
+
+At a high level, the following algorithms illustrate using Hash and Bloom methods together.
+
+=== Version based
+It seems there is a "version" construct in the GS objects which will be different in two GS if one is a modified version of the other. It is not clear if this construct is present in all sub-objects of GS, and their sub-objects. If in fact, it turns out that, this construct is present in the entire hierarchy of objects rooted in GS, then this will be used to detect if the GS differ since this will be faster than any of the proposed methods.
+
+Computing the actual delta itself will have to use Hash, bloom, or a combination as described in the following sections.
+
+[source,]
+----
+/**
+* Returns the method to use, given two similar (Comparable) Objects.
+*/
+selectMethod(Obj1, Obj2) {
+    if (sizeof(Obj1) > THRESHOLD)
+        return BLOOM;
+    if (sizeof(Obj2) > THRESHOLD)
+        return BLOOM;
+
+    return HASH;
+}
+
+bloomDelta(oldSet, newSet) {
+    bloom = {};
+    delta = {};
+
+    foreach (a in oldSet.arrayOfObj) {
+        foreach (e in a) {
+            bloom.add(e);
+        }
+    }
+
+    /**
+    * This is done for each member, loop is for
+    * brevity.
+    */
+    foreach (e in oldSet.simpleObj) {
+        bloom.add(e);
+    }
+
+    foreach (a in newSet.arrayOfObj) {
+        foreach (e in a) {
+            if (bloom.probe(e) == ABSENT) {
+                delta.add(e);
+        }
+    }
+
+    /**
+    * This is done for each member, loop is for
+    * brevity.
+    */
+    foreach (e in oldSet.simpleObj) {
+        if (bloom.probe(e) == ABSENT) {
+             delta.add(e);
+        }
+    }
+
+    return delta;
+}
+
+hashDelta(oldSet, newSet) {
+    hash = {};
+    delta = {};
+
+    foreach (a in oldSet.arrayOfObj) {
+        foreach (e in a) {
+            hash.add(e);
+        }
+    }
+
+    /**
+    * This is done for each member, loop is for
+    * brevity.
+    */
+    foreach (e in oldSet.simpleObj) {
+        hash.add(e);
+    }
+
+    foreach (a in newSet.arrayOfObj) {
+        foreach (e in a) {
+            if (bloom.probe(e) == ABSENT) {
+                delta.add(e);
+        }
+    }
+
+    /**
+    * This is done for each member, loop is for
+    * brevity.
+    */
+    foreach (e in oldSet.simpleObj) {
+        if (bloom.probe(e) == ABSENT) {
+             delta.add(e);
+        }
+    }
+
+    return delta;
+}
+
+/**
+* Given two comparable objects (oldSet and newSet), find the delta
+* as elements in newSet which are not present in oldSet.
+*/
+computeDelta(oldSet, newSet) {
+    if (selectMethod(oldSet, newSet) == BLOOM)
+        return bloomDelta(oldSet, newSet);
+    else
+        return hashDelta(oldSet, newSet);
+}
+----
+
+All the algorithms shown above may indicate that there is a generic version of each which works on any object but that is not really the case. They will have to be specific (virtual methods) for each type/class which is part of GS in the hierarchy.
+
+=== Handling hash collisions and false positives in bloom method
+An obvious omission in the algorithms is the case when a probe finds a match. In hashDelta method, it is easy to compare the values to resolve a possible false positive due to hash collision.
+
+In case of bloomDelta this value comparison is not a possibility because they are not part of the bloom filter.
+
+One solution would be to keep the false positive rate very low, say 0.0001, then the number of false positives will be less than 100 for every million objects. So, in 100 out of 1M cases we may end up pushing or pulling down a full GS.
+
